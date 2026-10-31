@@ -1,48 +1,48 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { sql } from "@/lib/db";
 import type { ParsedIntent } from "./parser";
 
 const brl = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-const monthStart = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10); };
 
-async function totals(db: SupabaseClient, userId: string) {
-  const { data } = await db.from("transactions").select("type, amount").eq("user_id", userId).eq("status", "confirmed");
-  let income = 0, expense = 0;
-  for (const t of data ?? []) t.type === "income" ? (income += Number(t.amount)) : (expense += Number(t.amount));
-  return { income, expense, balance: income - expense };
+async function totals() {
+  const [r] = await sql`select
+    coalesce(sum(amount) filter (where type='income'),0)::float as income,
+    coalesce(sum(amount) filter (where type='expense'),0)::float as expense
+    from transactions where status='confirmed'`;
+  return { income: r.income, expense: r.expense, balance: r.income - r.expense };
 }
 
-export async function handleIntent(db: SupabaseClient, userId: string, intent: ParsedIntent, externalId: string) {
+export async function handleIntent(intent: ParsedIntent, externalId: string) {
   if (intent.kind === "unknown")
     return "Não entendi. Tente “Gastei 35 reais no almoço” ou “Recebi 2.650 de salário”. Use /ajuda.";
 
   if (intent.kind === "transaction") {
-    const { data: cat } = await db.from("categories").select("id").eq("user_id", userId)
-      .eq("name", intent.category).eq("type", intent.type).maybeSingle();
-    const { error } = await db.from("transactions").insert({
-      user_id: userId, type: intent.type, amount: intent.amount, description: intent.description,
-      category_id: cat?.id ?? null, occurred_on: intent.date, source: "telegram", external_id: externalId,
-      status: intent.ambiguous ? "pending" : "confirmed",
-    });
-    if (error) return "Não consegui registrar agora. Tente novamente.";
+    try {
+      await sql`insert into transactions (type, amount, description, category_id, occurred_on, source, external_id, status)
+        values (${intent.type}, ${intent.amount}, ${intent.description},
+          (select id from categories where name=${intent.category} and type=${intent.type}),
+          ${intent.date}, 'telegram', ${externalId}, ${intent.ambiguous ? "pending" : "confirmed"})
+        on conflict (external_id) do nothing`;
+    } catch { return "Não consegui registrar agora. Tente novamente."; }
     const label = intent.type === "income" ? "Receita" : "Despesa";
     return intent.ambiguous
       ? `${label} de ${brl(intent.amount)} salva como pendente (categoria incerta). Confirme no painel.`
       : `✅ ${label} registrada: ${brl(intent.amount)} • ${intent.category}`;
   }
 
-  if (intent.query === "balance") return `Saldo disponível: ${brl((await totals(db, userId)).balance)}`;
+  if (intent.query === "balance") return `Saldo disponível: ${brl((await totals()).balance)}`;
   if (intent.query === "top_expense") {
-    const { data } = await db.from("transactions").select("description, amount").eq("user_id", userId)
-      .eq("type", "expense").gte("occurred_on", monthStart()).order("amount", { ascending: false }).limit(1);
-    return data?.[0] ? `Maior despesa do mês: ${data[0].description} (${brl(Number(data[0].amount))})` : "Sem despesas neste mês.";
+    const [r] = await sql`select description, amount::float as amount from transactions
+      where type='expense' and occurred_on >= date_trunc('month', current_date) order by amount desc limit 1`;
+    return r ? `Maior despesa do mês: ${r.description} (${brl(r.amount)})` : "Sem despesas neste mês.";
   }
-  const { data } = await db.from("transactions").select("amount, categories!inner(name)").eq("user_id", userId)
-    .eq("type", "expense").eq("categories.name", intent.category!).gte("occurred_on", monthStart());
-  return `Gasto com ${intent.category} neste mês: ${brl((data ?? []).reduce((s, r) => s + Number(r.amount), 0))}`;
+  const [r] = await sql`select coalesce(sum(t.amount),0)::float as total from transactions t
+    join categories c on c.id=t.category_id
+    where t.type='expense' and c.name=${intent.category!} and t.occurred_on >= date_trunc('month', current_date)`;
+  return `Gasto com ${intent.category} neste mês: ${brl(r.total)}`;
 }
 
-export async function handleCommand(db: SupabaseClient, userId: string, text: string) {
-  const t = await totals(db, userId);
+export async function handleCommand(text: string) {
+  const t = await totals();
   switch (text.split(" ")[0].toLowerCase()) {
     case "/start": return "Olá! Sou o assistente Monify. Registre gastos em linguagem natural ou use /ajuda.";
     case "/saldo": return `Saldo: ${brl(t.balance)}`;

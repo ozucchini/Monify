@@ -1,14 +1,10 @@
-# Monify — base (backend + banco + Telegram)
+# Monify (Neon, uso pessoal)
 Fase 1 entregue: schema Supabase com RLS, cifragem do token, conexão/desconexão do bot,
 webhook validado e idempotente, interpretador de mensagens plugável, comandos do bot.
 
 ## Configurar
-1. Crie um projeto no Supabase e rode `supabase/migrations/0001_init.sql`.
-2. `cp .env.example .env.local` e preencha (gere TOKEN_ENCRYPTION_KEY com `openssl rand -base64 32`).
-3. Crie o bot no @BotFather e copie o token.
-4. O webhook exige URL HTTPS pública (deploy na Vercel ou ngrok em dev).
-5. Em Assistente Telegram, cole o token e conecte; mande /start ao bot.
-
-## Pendente (próximas fases)
-create-next-app + shadcn, clientes Supabase (`lib/supabase/{server,admin}.ts`),
-layout/sidebar, dashboard, transações, orçamentos, relatórios, chat e seed de categorias.
+1. Neon: crie um banco novo e rode `db/schema.sql` no SQL Editor.
+2. `cp .env.example .env.local` e preencha (DATABASE_URL, senha do painel, segredos).
+3. `npm i @neondatabase/serverless zod`.
+4. URL pública com HTTPS (ngrok em dev, Vercel em produção) em NEXT_PUBLIC_APP_URL.
+5. Em Assistente Telegram, cole o token do bot e conecte; envie /start ao bot.
