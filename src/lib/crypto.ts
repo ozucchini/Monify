@@ -1,5 +1,9 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
-const key = () => Buffer.from(process.env.TOKEN_ENCRYPTION_KEY!, "base64");
+const key = () => {
+  const k = Buffer.from(process.env.TOKEN_ENCRYPTION_KEY ?? "", "base64");
+  if (k.length !== 32) throw new Error("TOKEN_ENCRYPTION_KEY inválida: gere com `openssl rand -base64 32`");
+  return k;
+};
 
 export function encrypt(plain: string) {
   const iv = randomBytes(12);
